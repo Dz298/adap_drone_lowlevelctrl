@@ -6,75 +6,95 @@ import onnx
 from onnx import numpy_helper
 from enum import Enum
 
+
 class ModelType(Enum):
     BASE_MODEL = 1
     ADAP_MODULE = 2
-   
-    
-# do inference, activate session, get inputs name
-# normalize obs, unnormalize inputs
 
-# TODO: ONNX model conversion, check validity 
-# TODO: where to put const size??? 
-# TODO: combine base model and adaptive module together!!
+# TODO: ONNX model conversion, check validity
 # TODO: Unit Test
 
 class Model:
-    def __init__(self, model_path='./best_so_far/base_model.onnx', model_rms_path='./best_so_far/base_model.npz', model_type=ModelType.BASE_MODEL):
-        self.model_path = model_path
-        self.model_rms_path = model_rms_path
-        self.model_type = model_type
-        
-        # TODO: base model + adap module def 
-        
+    def __init__(self, base_model_path='./best_so_far/base_model.onnx', adap_module_path='./best_so_far/adap_module.onnx', model_rms_path='./best_so_far/base_model.npz'):
+        self.base_model_path = base_model_path
+        self.adap_model_path = adap_module_path
+        self.base_model_rms_path = model_rms_path
+
         rms_data = np.load(self.model_rms_path)
         self.obs_mean = np.mean(rms_data["mean"], axis=0)
         self.obs_var = np.mean(rms_data["var"], axis=0)
-        
-        self.act_mean =  np.array([1.0 / 2, 1.0 / 2,
-                        1.0 / 2, 1.0 / 2])[np.newaxis, :]
+
+        self.act_mean = np.array([1.0 / 2, 1.0 / 2,
+                                  1.0 / 2, 1.0 / 2])[np.newaxis, :]
         self.act_std = np.array([1.0 / 2, 1.0 / 2,
-                        1.0 / 2, 1.0 / 2])[np.newaxis, :] 
-        
-        self.session = None
-        self.obs_name = None
+                                 1.0 / 2, 1.0 / 2])[np.newaxis, :]
+        self.act_size = 4
+        self.state_obs_size = 17
+        self.history_len = 400
+
+        self.base_session = None
+        self.adap_session = None
+        self.base_obs_name = None
+        self.adap_obs_name = None
+
+    def set_act_size(self, act_size):
+        self.act_size = act_size
+
+    def set_state_obs_size(self, state_obs_size):
+        self.state_obs_size = state_obs_size
+
+    def set_history_len(self, history_len):
+        self.history_len = history_len
 
     def activate(self):
-        self.session = onnxruntime.InferenceSession(self.model_path, None)
-        self.obs_name = self.session.get_inputs()[0].name  
+        self.base_session = onnxruntime.InferenceSession(
+            self.base_model_path, None)
+        self.base_obs_name = self.base_session.get_inputs()[0].name
+        self.adap_session = onnxruntime.InferenceSession(
+            self.adap_module_path, None)
+        self.adap_obs_name = self.adap_session.get_inputs()[0].name
 
-    def normalize_obs(self, obs):
-        if self.model_type is ModelType.BASE_MODEL:
+    def normalize_obs(self, obs, model_type):
+        if model_type is ModelType.BASE_MODEL:
             return (obs - self.obs_mean) / np.sqrt(self.obs_var + 1e-8)
         else:
-            # Normalize for Adaptation module observations 
+            # Normalize for Adaptation module observations
             obs_n_norm = obs.reshape([1, -1])
 
-            obs_current_n_normalized = obs_n_norm[:,
-                                          :-history_len*(act_size+state_obs_size)]
-            obs_current_normalized = (obs_current_n_normalized - self.obs_mean) / np.sqrt(self.obs_var + 1e-8)
-            obs_n_norm[:, :-history_len *
-               (act_size+state_obs_size)] = obs_current_normalized
+            # obs_current_n_normalized = obs_n_norm[:,
+            #                               :-history_len*(act_size+state_obs_size)]
+            # obs_current_normalized = (obs_current_n_normalized - self.obs_mean) / np.sqrt(self.obs_var + 1e-8)
+            # obs_n_norm[:, :-history_len *
+            #    (act_size+state_obs_size)] = obs_current_normalized
 
-            obs_state_history_n_normalized = obs_n_norm[:, -history_len*(
-                act_size+state_obs_size):-history_len*act_size]
+            obs_state_history_n_normalized = obs_n_norm[:, -self.history_len*(
+                self.act_size+self.state_obs_size):-self.history_len*self.act_size]
 
-            obs_state_mean = np.tile(obs_mean[:state_obs_size], [1, history_len])
-            obs_state_var = np.tile(obs_var[:state_obs_size], [1, history_len])
+            obs_state_mean = np.tile(self.obs_mean[:self.state_obs_size], [
+                                     1, self.history_len])
+            obs_state_var = np.tile(self.obs_var[:self.state_obs_size], [
+                                    1, self.history_len])
 
             obs_state_history_normalized = (
                 obs_state_history_n_normalized - obs_state_mean) / np.sqrt(obs_state_var + 1e-8)
 
-            obs_n_norm[:, -history_len*(act_size+state_obs_size):-history_len*act_size] = obs_state_history_normalized
+            obs_n_norm[:, -self.history_len*(self.act_size+self.state_obs_size)
+                                             :-self.history_len*self.act_size] = obs_state_history_normalized
 
             obs_norm = obs_n_norm
-            
+
             return obs_norm
+
+    def run(self, cur_obs, obs_history, act_history):
+        norm_cur_obs = self.normalize_obs(
+            cur_obs, model_type=ModelType.BASE_MODEL)
+        norm_history = self.normalize_obs(np.concatenate(
+            obs_history, act_history), model_type=ModelType.ADAP_MODULE)
         
-    def run(self,obs):
-        self.normalize_obs(obs)
-        action = self.session.run(None, {self.obs_name: obs})
-        norm_action = (action * act_std + act_mean)[0, :]
+        latent = self.adap_session.run(None,{self.adap_obs_name:norm_history})
+        # TODO: obs = concat([norm_cur_obs,latent])
+        action = self.basesession.run(None, {self.base_obs_name: obs})
+        norm_action = (action * self.act_std + self.act_mean)[0, :]
         return norm_action
 
 
