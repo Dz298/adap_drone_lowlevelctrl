@@ -14,6 +14,7 @@ class ModelType(Enum):
 # TODO: ONNX model conversion, check validity
 # TODO: Unit Test
 
+
 class Model:
     def __init__(self, base_model_path='./best_so_far/base_model.onnx', adap_module_path='./best_so_far/adap_module.onnx', model_rms_path='./best_so_far/base_model.npz'):
         self.base_model_path = base_model_path
@@ -45,6 +46,11 @@ class Model:
 
     def set_history_len(self, history_len):
         self.history_len = history_len
+        
+    def set_const_sizes(self,state_obs_size,act_size,history_len):
+        self.set_act_size(act_size)
+        self.set_state_obs_size(state_obs_size)
+        self.set_history_len(history_len)
 
     def activate(self):
         self.base_session = onnxruntime.InferenceSession(
@@ -56,7 +62,7 @@ class Model:
 
     def normalize_obs(self, obs, model_type):
         if model_type is ModelType.BASE_MODEL:
-            return (obs - self.obs_mean) / np.sqrt(self.obs_var + 1e-8)
+            return (obs - self.obs_mean[:self.state_obs_size+self.act_size]) / np.sqrt(self.obs_var[:self.state_obs_size+self.act_size] + 1e-8)
         else:
             # Normalize for Adaptation module observations
             obs_n_norm = obs.reshape([1, -1])
@@ -78,24 +84,24 @@ class Model:
             obs_state_history_normalized = (
                 obs_state_history_n_normalized - obs_state_mean) / np.sqrt(obs_state_var + 1e-8)
 
-            obs_n_norm[:, -self.history_len*(self.act_size+self.state_obs_size)
-                                             :-self.history_len*self.act_size] = obs_state_history_normalized
+            obs_n_norm[:, -self.history_len*(self.act_size+self.state_obs_size):-self.history_len*self.act_size] = obs_state_history_normalized
 
             obs_norm = obs_n_norm
 
             return obs_norm
 
-    def run(self, cur_obs, obs_history, act_history):
-        norm_cur_obs = self.normalize_obs(
-            cur_obs, model_type=ModelType.BASE_MODEL)
+    def run(self, cur_obs, last_act, obs_history, act_history):
+        norm_cur_obs = self.normalize_obs(np.concatenate(
+            (cur_obs, last_act)), model_type=ModelType.BASE_MODEL)
         norm_history = self.normalize_obs(np.concatenate(
-            obs_history, act_history), model_type=ModelType.ADAP_MODULE)
-        
-        latent = self.adap_session.run(None,{self.adap_obs_name:norm_history})
-        # TODO: obs = concat([norm_cur_obs,latent])
-        action = self.basesession.run(None, {self.base_obs_name: obs})
-        norm_action = (action * self.act_std + self.act_mean)[0, :]
-        return norm_action
+            (obs_history, act_history)), model_type=ModelType.ADAP_MODULE)
+
+        latent = self.adap_session.run(
+            None, {self.adap_obs_name: norm_history})
+        obs = np.concatenate((norm_cur_obs, latent))
+        raw_act = self.basesession.run(None, {self.base_obs_name: obs})
+        norm_action = (raw_act * self.act_std + self.act_mean)[0, :]
+        return norm_action, raw_act
 
 
 class QuadState:
@@ -137,3 +143,5 @@ class QuadState:
                    + " cmd_bodyrates: [%.2f, %.2f, %.2f]\n" % (
                        self.cmd_bodyrates[0], self.cmd_bodyrates[1], self.cmd_bodyrates[2])
         return repr_str
+
+    
