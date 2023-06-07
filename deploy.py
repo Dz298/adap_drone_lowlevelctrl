@@ -1,19 +1,12 @@
-TODO: structrue
 
-- controller class
-    - init 
-    - load_model
-    - .base_model
-    - .adap_module
-    - .vehicle_state (class)
-    - .act_history
-    - .obs_history
-    - .state_size
-    - .act_size
-    - .last_act
-    
-    
-- example_test_trajectory
+# - example_test_trajectory
 
 
-from utils import QuadState
+from utils import QuadState,Model
+from controller import AdapLowLevelControl
+
+
+low_level_controller = AdapLowLevelControl()
+cur_state = QuadState()
+
+motor_spd_command = low_level_controller.run(cur_state)
