@@ -18,8 +18,8 @@ class ModelType(Enum):
 class Model:
     def __init__(self, base_model_path='./best_so_far/base_model.onnx', adap_module_path='./best_so_far/adap_module.onnx', model_rms_path='./best_so_far/base_model.npz'):
         self.base_model_path = base_model_path
-        self.adap_model_path = adap_module_path
-        self.base_model_rms_path = model_rms_path
+        self.adap_module_path = adap_module_path
+        self.model_rms_path = model_rms_path
 
         rms_data = np.load(self.model_rms_path)
         self.obs_mean = np.mean(rms_data["mean"], axis=0)
@@ -95,11 +95,10 @@ class Model:
             (cur_obs, last_act)), model_type=ModelType.BASE_MODEL)
         norm_history = self.normalize_obs(np.concatenate(
             (obs_history, act_history)), model_type=ModelType.ADAP_MODULE)
-
         latent = self.adap_session.run(
             None, {self.adap_obs_name: norm_history})
-        obs = np.concatenate((norm_cur_obs, latent))
-        raw_act = self.basesession.run(None, {self.base_obs_name: obs})
+        obs = np.concatenate((norm_cur_obs.reshape(1,-1), np.asarray(latent).reshape((1,-1))),axis=1).astype(np.float32)
+        raw_act = self.base_session.run(None, {self.base_obs_name: obs})
         norm_action = (raw_act * self.act_std + self.act_mean)[0, :]
         return norm_action, raw_act
 
@@ -114,7 +113,7 @@ class QuadState:
         self.pos = np.array([0, 0, 0], dtype=np.float32)
 
         # quaternion [w,x,y,z]
-        self.att = np.array([0, 0, 0, 0], dtype=np.float32)
+        self.att = np.array([1, 0, 0, 0], dtype=np.float32)
 
         # velocity
         self.vel = np.array([0, 0, 0], dtype=np.float32)

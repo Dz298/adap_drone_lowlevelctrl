@@ -27,11 +27,13 @@ class AdapLowLevelControl:
         self.last_act = np.zeros((act_size,))
         
         
-        self.model.set_const_sizes()
+        self.model.set_const_sizes(state_obs_size,act_size,history_len)
         
         self.obs_history = deque([np.zeros(state_obs_size)]*history_len)
 
         self.act_history = deque([np.zeros(act_size)]*history_len)
+        
+        self.model.activate()
         
     def set_max_motor_spd(self,max_motor_spd):
         self.maxMotorSpd = max_motor_spd
@@ -41,19 +43,19 @@ class AdapLowLevelControl:
                              veh_state.att[3], veh_state.att[0]])
         rotation_matrix = R.from_quat(
             att_aray).as_matrix().reshape((9,), order="F")
-        cur_obs = np.concatenate([rotation_matrix, 
+        cur_obs = np.concatenate((rotation_matrix, 
                                           veh_state.omega, 
-                                          veh_state.proper_acc, 
+                                          np.array([veh_state.proper_acc[2]],dtype=np.float32),  
                                           veh_state.cmd_bodyrates,
-                                          veh_state.cmd_collective_thrust], axis=0).astype(np.float64)
+                                          veh_state.cmd_collective_thrust), axis=0).astype(np.float32)
         return cur_obs
         
     def run(self,veh_state):
         cur_obs = self.convert_vehState(veh_state)
         
         norm_act, raw_act = self.model.run(cur_obs,
-            self.last_act,np.asarray(self.obs_history, dtype=np.float64).flatten(),
-            np.asarray(self.act_history, dtype=np.float64).flatten())
+            self.last_act,np.asarray(self.obs_history, dtype=np.float32).flatten(),
+            np.asarray(self.act_history, dtype=np.float32).flatten())
         
         
         self.obs_history.popleft()

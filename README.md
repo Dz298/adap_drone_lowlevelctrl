@@ -20,4 +20,7 @@ Video (Narrated): [YouTube](https://youtu.be/U-c-LbTfvoA)
 
 ## Usage
 
-- [ ] TODO
+We can run the following scipts to see the usage of our controller
+```
+python3 deploy.py
+```
