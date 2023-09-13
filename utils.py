@@ -6,6 +6,8 @@ import onnx
 from onnx import numpy_helper
 from enum import Enum
 
+import os
+
 
 class ModelType(Enum):
     BASE_MODEL = 1
@@ -16,10 +18,11 @@ class ModelType(Enum):
 
 
 class Model:
-    def __init__(self, base_model_path='./best_so_far/base_model.onnx', adap_module_path='./best_so_far/adap_module.onnx', model_rms_path='./best_so_far/base_model.npz'):
-        self.base_model_path = base_model_path
-        self.adap_module_path = adap_module_path
-        self.model_rms_path = model_rms_path
+    def __init__(self, base_model_path='/best_so_far/base_model.onnx', adap_module_path='/best_so_far/adap_module.onnx', model_rms_path='/best_so_far/base_model.npz'):
+        current_path = os.path.dirname(os.path.abspath(__file__))
+        self.base_model_path = current_path+base_model_path
+        self.adap_module_path = current_path+adap_module_path
+        self.model_rms_path = current_path+model_rms_path
 
         rms_data = np.load(self.model_rms_path)
         self.obs_mean = np.mean(rms_data["mean"], axis=0)
@@ -98,7 +101,7 @@ class Model:
         latent = self.adap_session.run(
             None, {self.adap_obs_name: norm_history})
         obs = np.concatenate((norm_cur_obs.reshape(1,-1), np.asarray(latent).reshape((1,-1))),axis=1).astype(np.float32)
-        raw_act = self.base_session.run(None, {self.base_obs_name: obs})
+        raw_act = np.asarray(self.base_session.run(None, {self.base_obs_name: obs})).squeeze()
         norm_action = (raw_act * self.act_std + self.act_mean)[0, :]
         return norm_action, raw_act
 
@@ -139,8 +142,7 @@ class QuadState:
                    + " omega: [%.2f, %.2f, %.2f]\n" % (self.omega[0], self.omega[1], self.omega[2])\
                    + " proper_acc: [%.2f, %.2f, %.2f]\n" % (self.proper_acc[0], self.proper_acc[1], self.proper_acc[2])\
                    + " cmd_collective_thrust: [%.2f]\n" % (self.cmd_collective_thrust[0])\
-                   + " cmd_bodyrates: [%.2f, %.2f, %.2f]\n" % (
-                       self.cmd_bodyrates[0], self.cmd_bodyrates[1], self.cmd_bodyrates[2])
+                   + " cmd_bodyrates: [%.2f, %.2f, %.2f]\n" % (self.cmd_bodyrates[0], self.cmd_bodyrates[1], self.cmd_bodyrates[2])
         return repr_str
 
     
